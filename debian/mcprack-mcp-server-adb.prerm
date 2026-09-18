@@ -5,6 +5,9 @@ case "$1" in
   remove|deconfigure)
     if getent passwd mcprack >/dev/null 2>&1 && [ -d /usr/lib/mcprack ]; then
       su -s /bin/sh mcprack -c "cd /usr/lib/mcprack && set -a; . /etc/mcprack/env; set +a; \
+        mcprack server delete mcp-server-adb --yes" || true
+      # Clean up previous catalog name after package rename
+      su -s /bin/sh mcprack -c "cd /usr/lib/mcprack && set -a; . /etc/mcprack/env; set +a; \
         mcprack server delete mcp-server-phone --yes" || true
     fi
     ;;

@@ -1,3 +1,11 @@
+mcp-server-adb (0.3.7-2) unstable; urgency=medium
+
+  * Rename source/binary package phone-mcp-server → mcp-server-adb.
+  * Rename companion mcprack-mcp-server-phone → mcprack-mcp-server-adb.
+  * Provide/Replace/Break previous package names for smooth upgrades.
+
+ -- vitex <info@vitexsoftware.cz>  Fri, 18 Sep 2026 23:24:00 +0200
+
 phone-mcp-server (0.3.7-1) unstable; urgency=medium
 
   * Security fix: add PHONE_READONLY (default true, fail-closed)

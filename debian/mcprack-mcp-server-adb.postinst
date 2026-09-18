@@ -5,7 +5,7 @@ case "$1" in
   configure)
     if getent passwd mcprack >/dev/null 2>&1 && [ -d /usr/lib/mcprack ]; then
       su -s /bin/sh mcprack -c "cd /usr/lib/mcprack && set -a; . /etc/mcprack/env; set +a; \
-        mcprack server create mcp-server-phone \
+        mcprack server create mcp-server-adb \
           --label 'Phone MCP Server (ADB)' \
           --transport stdio \
           --command /usr/bin/phone-mcp \

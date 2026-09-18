@@ -115,9 +115,9 @@ distributions.each { distro ->
                         sh 'echo "INSTALATION"'
 
                         // Only install the main package in CI. The companion
-                        // mcprack-mcp-server-phone pulls in mcprack → bw-cli,
+                        // mcprack-mcp-server-adb pulls in mcprack → bw-cli,
                         // which is not always installable in the build image.
-                        def installOrder = ['phone-mcp-server']
+                        def installOrder = ['mcp-server-adb']
 
                         def sorted_artifacts = artifacts.toList()
 
