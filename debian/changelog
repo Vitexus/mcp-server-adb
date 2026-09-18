@@ -1,3 +1,10 @@
+mcp-server-adb (0.3.7-3) unstable; urgency=medium
+
+  * Auto-detect default phone country calling code from system locales
+    instead of hard-coding +86; override via PHONE_COUNTRY_CODE.
+
+ -- vitex <info@vitexsoftware.cz>  Fri, 18 Sep 2026 23:40:00 +0200
+
 mcp-server-adb (0.3.7-2) unstable; urgency=medium
 
   * Rename source/binary package phone-mcp-server → mcp-server-adb.

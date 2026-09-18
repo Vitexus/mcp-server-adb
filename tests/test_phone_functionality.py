@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 # 导入被测试的模块
 from phone_mcp.core import check_device_connection, run_command
+from phone_mcp.config import DEFAULT_COUNTRY_CODE
 from phone_mcp.tools.call import call_number, end_call
 from phone_mcp.tools.messaging import (
     send_text_message,
@@ -98,7 +99,7 @@ class TestPhoneFunctionality:
             result = await call_number(phone_number)
 
             # 验证结果
-            assert "+86" + phone_number in result  # 注意：函数会自动添加+86前缀
+            assert DEFAULT_COUNTRY_CODE + phone_number in result  # locale-detected prefix
             assert "Calling" in result
             # 验证被调用
             assert mock_call.called
@@ -176,7 +177,7 @@ class TestPhoneFunctionality:
                 result = await send_text_message(phone_number, message)
 
             # 验证结果
-            assert "+86" + phone_number in result  # 注意：函数会自动添加+86前缀
+            assert DEFAULT_COUNTRY_CODE + phone_number in result  # locale-detected prefix
             assert "sent" in result
             # 验证被调用至少一次
             assert mock_msg.call_count > 0

@@ -28,12 +28,13 @@ async def send_text_message(phone_number: str, message: str) -> str:
     """
     if (blocked := require_writable()) is not None:
         return blocked
-    # Add country code if not already included
-    if not phone_number.startswith("+"):
+    # Add locale-detected country code if not already included
+    if not phone_number.startswith("+") and DEFAULT_COUNTRY_CODE:
         phone_number = DEFAULT_COUNTRY_CODE + phone_number
 
     # Validate phone number format
-    if not phone_number[1:].isdigit():
+    digits = phone_number[1:] if phone_number.startswith("+") else phone_number
+    if not digits.isdigit():
         return "Invalid phone number format. Please use numeric digits only."
 
     # Escape single quotes in the message
