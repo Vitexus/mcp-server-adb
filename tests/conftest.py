@@ -1,8 +1,18 @@
 import os
+import sys
 import pytest
 import asyncio
 import warnings
+from pathlib import Path
 from unittest.mock import patch
+
+# Prefer the in-tree package over any system-installed phone_mcp
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+# Allow mutating tools (call/SMS/etc.) during unit tests; production defaults to read-only.
+os.environ.setdefault("PHONE_READONLY", "false")
 
 # 不使用pytest_plugins，而是直接配置插件
 # pytest_plugins = ['pytest_asyncio']
