@@ -15,9 +15,24 @@ from .core import check_device_connection
 from .tools.call import call_number, end_call, receive_incoming_call
 from .tools.messaging import send_text_message, receive_text_messages, get_sent_messages
 from .tools.media import take_screenshot, start_screen_recording, play_media
-from .tools.apps import set_alarm, list_installed_apps, terminate_app, launch_app_activity
+from .tools.apps import (
+    set_alarm,
+    list_installed_apps,
+    terminate_app,
+    launch_app_activity,
+    install_app,
+    uninstall_app,
+    grant_permission,
+    open_file,
+)
 from .tools.contacts import get_contacts, create_contact
-from .tools.system import get_current_window, get_app_shortcuts
+from .tools.system import (
+    get_current_window,
+    get_app_shortcuts,
+    push_file,
+    pull_file,
+    get_screen_info,
+)
 from .tools.system import launch_app_activity as launch_activity_system
 from .tools.maps import get_phone_numbers_from_poi
 from .tools.interactions import (
@@ -524,6 +539,51 @@ async def close_app(args):
     """Force stop an app."""
     result = await terminate_app(args.package)
     print(format_json_output(result))
+
+
+async def install(args):
+    """Install an APK onto the device."""
+    result = await install_app(args.apk, not args.no_reinstall, args.grant_permissions)
+    print(format_json_output(result))
+
+
+async def uninstall(args):
+    """Uninstall an app from the device."""
+    result = await uninstall_app(args.package, args.keep_data)
+    print(format_json_output(result))
+
+
+async def grant(args):
+    """Grant a permission to an installed app."""
+    result = await grant_permission(args.package, args.permission)
+    print(format_json_output(result))
+
+
+async def open_device_file(args):
+    """Open a file that is already on the device."""
+    result = await open_file(args.path, args.package, args.activity, args.mime_type)
+    print(format_json_output(result))
+
+
+async def push(args):
+    """Copy a local file onto the device."""
+    result = await push_file(args.local, args.remote)
+    print(format_json_output(result))
+
+
+async def pull(args):
+    """Copy a file from the device to this machine."""
+    result = await pull_file(args.remote, args.local)
+    print(format_json_output(result))
+
+
+async def screen_info(args):
+    """Show display geometry and rotation."""
+    result = await get_screen_info()
+    # the geometry is the whole point of this command, so it is printed as it
+    # comes rather than collapsed into a one-line status by the formatter
+    data = json.loads(result)
+    print(format_json_output(result) if data.get("status") == "error" else result)
 
 
 async def alarm(args):
@@ -1364,6 +1424,41 @@ def main():
     app_close_parser = subparsers.add_parser("close-app", help="Force stop an app")
     app_close_parser.add_argument("package", help="Package name of the app to terminate")
     
+    # App install command
+    install_parser = subparsers.add_parser("install", help="Install an APK onto the device")
+    install_parser.add_argument("apk", help="Path to the .apk file on this machine")
+    install_parser.add_argument("--no-reinstall", action="store_true", help="Fail instead of replacing an installed version")
+    install_parser.add_argument("--grant-permissions", action="store_true", help="Grant all runtime permissions at install time")
+
+    # App uninstall command
+    uninstall_parser = subparsers.add_parser("uninstall", help="Uninstall an app")
+    uninstall_parser.add_argument("package", help="Package name of the app to remove")
+    uninstall_parser.add_argument("--keep-data", action="store_true", help="Keep the app's data and cache directories")
+
+    # Permission command
+    grant_parser = subparsers.add_parser("grant", help="Grant a permission to an app")
+    grant_parser.add_argument("package", help="Package name of the app")
+    grant_parser.add_argument("permission", help="Permission name, qualified or bare (e.g. READ_EXTERNAL_STORAGE)")
+
+    # Open a file already on the device
+    open_file_parser = subparsers.add_parser("open-file", help="Open a file stored on the device")
+    open_file_parser.add_argument("path", help="Absolute path on the device, e.g. /sdcard/Download/book.epub")
+    open_file_parser.add_argument("--package", help="Package to open the file with")
+    open_file_parser.add_argument("--activity", help="Activity within that package")
+    open_file_parser.add_argument("--mime-type", help="MIME type to declare, e.g. application/epub+zip")
+
+    # File transfer commands
+    push_parser = subparsers.add_parser("push", help="Copy a local file onto the device")
+    push_parser.add_argument("local", help="Path to the file on this machine")
+    push_parser.add_argument("remote", help="Destination directory or file path on the device")
+
+    pull_parser = subparsers.add_parser("pull", help="Copy a file from the device")
+    pull_parser.add_argument("remote", help="Path to the file on the device")
+    pull_parser.add_argument("local", help="Destination directory or file path on this machine")
+
+    # Display information command
+    subparsers.add_parser("screen-info", help="Show display size, density and rotation")
+
     # List installed apps command
     apps_list_parser = subparsers.add_parser("list-apps", help="List installed applications")
     apps_list_parser.add_argument("--system", action="store_true", help="Show only system apps")
@@ -1448,6 +1543,13 @@ def main():
         "shortcuts": check_shortcuts,
         "launch": launch,
         "close-app": close_app,
+        "install": install,
+        "uninstall": uninstall,
+        "grant": grant,
+        "open-file": open_device_file,
+        "push": push,
+        "pull": pull,
+        "screen-info": screen_info,
         "list-apps": list_apps,
         "alarm": alarm,
         "incoming": receive_call,
