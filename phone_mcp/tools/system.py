@@ -5,8 +5,11 @@ This module provides functions to access system-level information on the phone.
 
 import asyncio
 import json
+import os
 import re
-from ..core import run_command
+import shlex
+from ..core import run_command, check_device_connection
+from ..readonly import require_writable
 
 
 async def get_current_window():
@@ -340,3 +343,188 @@ async def get_app_shortcuts(package_name=None):
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error retrieving app shortcuts: {str(e)}"
+
+
+async def push_file(local_path: str, device_path: str) -> str:
+    """Copy a file from the machine running this server onto the device.
+
+    Args:
+        local_path (str): Path to the file on this machine
+        device_path (str): Destination on the device, either a directory
+                           ("/sdcard/Download/") or a full file path
+
+    Returns:
+        str: JSON string with operation result:
+            {
+                "status": "success",
+                "message": str,
+                "device_path": str,
+                "size_bytes": int
+            }
+            or {"status": "error", "message": str}
+    """
+    if (blocked := require_writable()) is not None:
+        return json.dumps({"status": "error", "message": blocked})
+
+    if not os.path.isfile(local_path):
+        return json.dumps(
+            {"status": "error", "message": f"File not found: {local_path}"}
+        )
+
+    connection_status = await check_device_connection()
+    if "ready" not in connection_status:
+        return json.dumps({"status": "error", "message": connection_status})
+
+    success, output = await run_command(
+        f"adb push {shlex.quote(local_path)} {shlex.quote(device_path)}", timeout=600
+    )
+
+    if not success:
+        return json.dumps(
+            {"status": "error", "message": f"Failed to push file: {output.strip()}"}
+        )
+
+    # A destination given as a directory keeps the source file's name.
+    target = (
+        device_path.rstrip("/") + "/" + os.path.basename(local_path)
+        if device_path.endswith("/")
+        else device_path
+    )
+
+    return json.dumps(
+        {
+            "status": "success",
+            "message": f"Pushed {local_path} to {target}",
+            "device_path": target,
+            "size_bytes": os.path.getsize(local_path),
+        }
+    )
+
+
+async def pull_file(device_path: str, local_path: str) -> str:
+    """Copy a file from the device to the machine running this server.
+
+    Args:
+        device_path (str): Path to the file on the device
+        local_path (str): Destination on this machine, either a directory or a
+                          full file path
+
+    Returns:
+        str: JSON string with operation result:
+            {
+                "status": "success",
+                "message": str,
+                "local_path": str,
+                "size_bytes": int
+            }
+            or {"status": "error", "message": str}
+    """
+    connection_status = await check_device_connection()
+    if "ready" not in connection_status:
+        return json.dumps({"status": "error", "message": connection_status})
+
+    success, output = await run_command(
+        f"adb pull {shlex.quote(device_path)} {shlex.quote(local_path)}", timeout=600
+    )
+
+    if not success:
+        return json.dumps(
+            {"status": "error", "message": f"Failed to pull file: {output.strip()}"}
+        )
+
+    target = (
+        os.path.join(local_path, os.path.basename(device_path))
+        if os.path.isdir(local_path)
+        else local_path
+    )
+
+    if not os.path.isfile(target):
+        return json.dumps(
+            {
+                "status": "error",
+                "message": f"adb reported success but {target} is missing: {output.strip()}",
+            }
+        )
+
+    return json.dumps(
+        {
+            "status": "success",
+            "message": f"Pulled {device_path} to {target}",
+            "local_path": target,
+            "size_bytes": os.path.getsize(target),
+        }
+    )
+
+
+async def get_screen_info() -> str:
+    """Get the device's display geometry and current rotation.
+
+    The physical size is the panel's own resolution and never changes; the
+    current size is what apps are laid out in, so it follows rotation and any
+    size override set with ``wm size``. Tap coordinates are in current-size
+    space.
+
+    Returns:
+        str: JSON string with display details:
+            {
+                "status": "success",
+                "physical_size": {"width": int, "height": int},
+                "current_size": {"width": int, "height": int},
+                "override_size": {"width": int, "height": int} (only when set),
+                "density_dpi": int,
+                "rotation_degrees": int,
+                "orientation": "portrait" or "landscape"
+            }
+            or {"status": "error", "message": str}
+    """
+    connection_status = await check_device_connection()
+    if "ready" not in connection_status:
+        return json.dumps({"status": "error", "message": connection_status})
+
+    success, size_output = await run_command("adb shell wm size")
+    if not success:
+        return json.dumps(
+            {
+                "status": "error",
+                "message": f"Failed to read screen size: {size_output.strip()}",
+            }
+        )
+
+    result = {"status": "success"}
+
+    if match := re.search(r"Physical size:\s*(\d+)x(\d+)", size_output):
+        result["physical_size"] = {
+            "width": int(match.group(1)),
+            "height": int(match.group(2)),
+        }
+
+    if match := re.search(r"Override size:\s*(\d+)x(\d+)", size_output):
+        result["override_size"] = {
+            "width": int(match.group(1)),
+            "height": int(match.group(2)),
+        }
+
+    success, density_output = await run_command("adb shell wm density")
+    if success:
+        if match := re.search(r"density:\s*(\d+)", density_output):
+            result["density_dpi"] = int(match.group(1))
+
+    success, display_output = await run_command("adb shell dumpsys window displays")
+    if success:
+        # cur= is the display as it stands right now, rotation and any override
+        # already applied - which is the box tap coordinates are measured in.
+        if match := re.search(r"cur=(\d+)x(\d+)", display_output):
+            result["current_size"] = {
+                "width": int(match.group(1)),
+                "height": int(match.group(2)),
+            }
+        if match := re.search(r"mCurrentRotation=ROTATION_(\d+)", display_output):
+            result["rotation_degrees"] = int(match.group(1))
+
+    current = result.get("current_size") or result.get("physical_size")
+    if current:
+        result["orientation"] = (
+            "landscape" if current["width"] > current["height"] else "portrait"
+        )
+
+    return json.dumps(result, indent=2)

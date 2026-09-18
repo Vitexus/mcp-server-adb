@@ -1,13 +1,26 @@
 """App-related phone control functions."""
 
 import json
+import os
 import re
+import shlex
 import logging
 from ..core import run_command, check_device_connection
 from ..readonly import require_writable
 from typing import Optional, Dict
 
 logger = logging.getLogger("phone_mcp")
+
+#: Special permissions ``pm grant`` refuses - they are app ops, set through
+#: ``appops`` under their bare name.
+APP_OPS_PERMISSIONS = frozenset(
+    {
+        "MANAGE_EXTERNAL_STORAGE",
+        "SYSTEM_ALERT_WINDOW",
+        "WRITE_SETTINGS",
+        "REQUEST_INSTALL_PACKAGES",
+    }
+)
 
 
 async def list_installed_apps(
@@ -253,6 +266,268 @@ async def terminate_app(package_name: str):
         return f"Successfully terminated {package_name}"
     else:
         return f"Failed to terminate app: {output}"
+
+
+async def install_app(
+    apk_path: str, reinstall: bool = True, grant_permissions: bool = False
+) -> str:
+    """Install an APK from the local machine onto the device.
+
+    Args:
+        apk_path (str): Path to the .apk file on the machine running this server
+        reinstall (bool): Keep the existing app's data when a previous version is
+                          installed (``adb install -r``). Defaults to True.
+        grant_permissions (bool): Grant all runtime permissions the manifest
+                                  declares (``adb install -g``). Defaults to False.
+
+    Returns:
+        str: JSON string with operation result:
+            {
+                "status": "success",
+                "message": "Installed <apk_path>",
+                "package_name": str (when it could be read from the APK)
+            }
+            or {"status": "error", "message": str}
+    """
+    if (blocked := require_writable()) is not None:
+        return json.dumps({"status": "error", "message": blocked})
+
+    if not os.path.isfile(apk_path):
+        return json.dumps(
+            {"status": "error", "message": f"APK not found: {apk_path}"}
+        )
+
+    connection_status = await check_device_connection()
+    if "ready" not in connection_status:
+        return json.dumps({"status": "error", "message": connection_status})
+
+    flags = ""
+    if reinstall:
+        flags += " -r"
+    if grant_permissions:
+        flags += " -g"
+
+    # An APK of a few hundred MB over USB outlasts the default command timeout.
+    # adb writes both its progress and its verdict to stdout and then exits
+    # non-zero on failure, and run_command keeps only stderr in that case, so
+    # the streams are merged and the exit status neutralised - the verdict in
+    # the text is what says whether it worked.
+    success, output = await run_command(
+        f"adb install{flags} {shlex.quote(apk_path)} 2>&1 || true", timeout=600
+    )
+
+    if not success or "Success" not in output:
+        return json.dumps(
+            {"status": "error", "message": f"Failed to install app: {output.strip()}"}
+        )
+
+    result = {"status": "success", "message": f"Installed {apk_path}"}
+
+    package_name = await _package_name_of_apk(apk_path)
+    if package_name:
+        result["package_name"] = package_name
+
+    return json.dumps(result)
+
+
+async def _package_name_of_apk(apk_path: str) -> Optional[str]:
+    """Read the package name out of an APK.
+
+    The name lives in the binary AndroidManifest.xml, which needs a real parser,
+    so this asks the build tools. They are frequently not installed - hence
+    None rather than an error, and a caller that only got a path still gets its
+    install confirmed.
+    """
+    success, output = await run_command(f"aapt dump badging {shlex.quote(apk_path)}")
+    if success:
+        if match := re.search(r"package: name='([^']+)'", output):
+            return match.group(1)
+
+    success, output = await run_command(
+        f"aapt2 dump packagename {shlex.quote(apk_path)}"
+    )
+    if success and output.strip():
+        return output.strip().splitlines()[0]
+
+    return None
+
+
+async def uninstall_app(package_name: str, keep_data: bool = False) -> str:
+    """Uninstall an application from the device.
+
+    Args:
+        package_name (str): Package name of the app to remove
+        keep_data (bool): Keep the app's data and cache directories
+                          (``adb uninstall -k``). Defaults to False.
+
+    Returns:
+        str: JSON string with operation result:
+            {"status": "success", "message": "Uninstalled <package_name>"}
+            or {"status": "error", "message": str}
+    """
+    if (blocked := require_writable()) is not None:
+        return json.dumps({"status": "error", "message": blocked})
+
+    connection_status = await check_device_connection()
+    if "ready" not in connection_status:
+        return json.dumps({"status": "error", "message": connection_status})
+
+    flags = " -k" if keep_data else ""
+    # Same as install: the verdict is on stdout, the exit status non-zero.
+    success, output = await run_command(
+        f"adb uninstall{flags} {shlex.quote(package_name)} 2>&1 || true"
+    )
+
+    if not success or "Success" not in output:
+        return json.dumps(
+            {
+                "status": "error",
+                "message": f"Failed to uninstall app: {output.strip()}",
+            }
+        )
+
+    return json.dumps(
+        {"status": "success", "message": f"Uninstalled {package_name}"}
+    )
+
+
+async def grant_permission(package_name: str, permission: str) -> str:
+    """Grant a permission to an installed application.
+
+    Runtime permissions go through ``pm grant``. The all-files permission
+    MANAGE_EXTERNAL_STORAGE is not a runtime permission and ``pm grant``
+    rejects it, so it is set through ``appops`` instead.
+
+    Args:
+        package_name (str): Package name of the app
+        permission (str): Permission to grant, either fully qualified
+                          ("android.permission.READ_EXTERNAL_STORAGE") or bare
+                          ("READ_EXTERNAL_STORAGE")
+
+    Returns:
+        str: JSON string with operation result:
+            {"status": "success", "message": str}
+            or {"status": "error", "message": str}
+    """
+    if (blocked := require_writable()) is not None:
+        return json.dumps({"status": "error", "message": blocked})
+
+    connection_status = await check_device_connection()
+    if "ready" not in connection_status:
+        return json.dumps({"status": "error", "message": connection_status})
+
+    bare_name = permission.rsplit(".", 1)[-1]
+
+    if bare_name in APP_OPS_PERMISSIONS:
+        cmd = (
+            f"adb shell appops set {shlex.quote(package_name)} "
+            f"{shlex.quote(bare_name)} allow"
+        )
+    else:
+        qualified = (
+            permission if "." in permission else f"android.permission.{permission}"
+        )
+        cmd = (
+            f"adb shell pm grant {shlex.quote(package_name)} {shlex.quote(qualified)}"
+        )
+
+    success, output = await run_command(cmd)
+
+    # pm grant prints its complaints on stderr and still exits non-zero, but
+    # appops stays silent on both streams when it accepts the op.
+    if not success:
+        # pm grant answers a bad permission with a Java stack trace; only its
+        # first line says anything a caller can act on.
+        reason = output.strip().splitlines()
+        reason = reason[0] if reason else "no output from adb"
+        return json.dumps(
+            {"status": "error", "message": f"Failed to grant permission: {reason}"}
+        )
+
+    return json.dumps(
+        {
+            "status": "success",
+            "message": f"Granted {permission} to {package_name}",
+        }
+    )
+
+
+async def open_file(
+    device_path: str,
+    package_name: Optional[str] = None,
+    activity_name: Optional[str] = None,
+    mime_type: Optional[str] = None,
+) -> str:
+    """Open a file that is already on the device, optionally in a chosen app.
+
+    Sends an ACTION_VIEW intent for the file. Without a package name the device
+    picks the handler itself, which may raise its own chooser dialog; naming a
+    package and activity opens it in that app directly.
+
+    Args:
+        device_path (str): Absolute path on the device, e.g. "/sdcard/Download/book.epub"
+        package_name (str, optional): Package to open the file with
+        activity_name (str, optional): Activity within that package. A leading dot
+                                       is resolved against the package, as in adb.
+                                       Ignored without package_name.
+        mime_type (str, optional): MIME type to declare, e.g. "application/epub+zip".
+                                   Some apps only match an intent that carries one.
+
+    Returns:
+        str: JSON string with operation result:
+            {"status": "success", "message": "Opened <device_path>"}
+            or {"status": "error", "message": str}
+
+    Examples:
+        # Let the device choose the app
+        result = await open_file("/sdcard/Download/book.epub")
+
+        # Open in a named app
+        result = await open_file(
+            "/sdcard/Download/book.epub",
+            "com.foobnix.pro.pdf.reader",
+            "com.foobnix.OpenerActivity",
+            "application/epub+zip",
+        )
+    """
+    if (blocked := require_writable()) is not None:
+        return json.dumps({"status": "error", "message": blocked})
+
+    connection_status = await check_device_connection()
+    if "ready" not in connection_status:
+        return json.dumps({"status": "error", "message": connection_status})
+
+    success, _ = await run_command(f"adb shell ls {shlex.quote(device_path)}")
+    if not success:
+        return json.dumps(
+            {
+                "status": "error",
+                "message": f"File not found on device: {device_path}",
+            }
+        )
+
+    cmd = (
+        "adb shell am start -a android.intent.action.VIEW "
+        f"-d {shlex.quote('file://' + device_path)}"
+    )
+    if mime_type:
+        cmd += f" -t {shlex.quote(mime_type)}"
+    if package_name:
+        component = (
+            f"{package_name}/{activity_name}" if activity_name else package_name
+        )
+        cmd += f" -n {shlex.quote(component)}"
+
+    success, output = await run_command(cmd)
+
+    # am start reports a missing component or an unhandled intent as "Error:"
+    # on stdout while still exiting zero.
+    if not success or "Error:" in output:
+        return json.dumps(
+            {"status": "error", "message": f"Failed to open file: {output.strip()}"}
+        )
+
+    return json.dumps({"status": "success", "message": f"Opened {device_path}"})
 
 
 async def set_alarm(hour: int, minute: int, label: str = "Alarm") -> str:

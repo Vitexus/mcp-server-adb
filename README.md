@@ -105,8 +105,9 @@ Usage:
 - 💬 **Messaging**: Send and receive SMS, get raw messages
 - 👥 **Contacts**: Access phone contacts, create new contacts with automated UI interaction
 - 📸 **Media**: Screenshots, screen recording, media control
-- 📱 **Apps**: Launch applications, launch specific activities with intents, list installed apps, terminate apps
-- 🔧 **System**: Window info, app shortcuts
+- 📱 **Apps**: Launch applications, launch specific activities with intents, list installed apps, install and uninstall APKs, grant permissions, terminate apps
+- 📂 **Files**: Push files to the device, pull them back, open a file on the device in a chosen app
+- 🔧 **System**: Window info, app shortcuts, display size, density and rotation
 - 🗺️ **Maps**: Search POIs with phone numbers
 - 🖱️ **UI Interaction**: Tap, swipe, type text, press keys
 - 🔍 **UI Inspection**: Find elements by text, ID, class or description
@@ -130,6 +131,9 @@ phone-cli check
 
 # Get screen size
 phone-cli screen-interact find method=clickable
+
+# Get display size, density and rotation
+phone-cli screen-info
 ```
 
 ### Communication
@@ -196,6 +200,22 @@ phone-cli launch com.android.dialer/com.android.dialer.DialtactsActivity
 
 # Open URL in default browser
 phone-cli open-url google.com
+
+# Install an APK from this machine
+phone-cli install ./app.apk
+
+# Uninstall an app, keeping its data
+phone-cli uninstall com.example.app --keep-data
+
+# Grant a permission (qualified or bare name; MANAGE_EXTERNAL_STORAGE goes through appops)
+phone-cli grant com.example.app READ_EXTERNAL_STORAGE
+
+# Copy a file to the device and back
+phone-cli push ./book.epub /sdcard/Download/
+phone-cli pull /sdcard/Download/book.epub ./
+
+# Open a file already on the device, in a chosen app
+phone-cli open-file /sdcard/Download/book.epub --package com.example.reader --mime-type application/epub+zip
 ```
 
 ### Screen Analysis & Interaction
@@ -433,6 +453,72 @@ async def launch_intent(intent_action: str, intent_type: Optional[str] = None, e
   - `extras`: Extra data to pass with the intent (optional)
 - **Returns:** JSON string with operation result
 - **Location:** This function is found in the 'apps.py' module
+
+#### install_app
+```python
+async def install_app(apk_path: str, reinstall: bool = True, grant_permissions: bool = False) -> str:
+    """Install an APK from the local machine onto the device"""
+```
+- **Parameters:**
+  - `apk_path`: Path to the .apk file on the machine running the server
+  - `reinstall`: Keep the existing app's data when replacing a version (`adb install -r`)
+  - `grant_permissions`: Grant all runtime permissions at install time (`adb install -g`)
+- **Returns:** JSON string with operation result, including `package_name` when build tools are available to read it
+- **Location:** This function is found in the 'apps.py' module
+
+#### uninstall_app
+```python
+async def uninstall_app(package_name: str, keep_data: bool = False) -> str:
+    """Uninstall an application from the device"""
+```
+- **Parameters:**
+  - `package_name`: Package name of the app to remove
+  - `keep_data`: Keep the app's data and cache directories (`adb uninstall -k`)
+- **Returns:** JSON string with operation result
+- **Location:** This function is found in the 'apps.py' module
+
+#### grant_permission
+```python
+async def grant_permission(package_name: str, permission: str) -> str:
+    """Grant a permission to an installed application"""
+```
+- **Parameters:**
+  - `package_name`: Package name of the app
+  - `permission`: Qualified ("android.permission.CAMERA") or bare ("CAMERA") permission name
+- **Returns:** JSON string with operation result
+- **Note:** MANAGE_EXTERNAL_STORAGE, SYSTEM_ALERT_WINDOW, WRITE_SETTINGS and REQUEST_INSTALL_PACKAGES are app ops rather than runtime permissions, and are set through `appops` instead of `pm grant`
+- **Location:** This function is found in the 'apps.py' module
+
+#### open_file
+```python
+async def open_file(device_path: str, package_name: Optional[str] = None, activity_name: Optional[str] = None, mime_type: Optional[str] = None) -> str:
+    """Open a file that is already on the device, optionally in a chosen app"""
+```
+- **Parameters:**
+  - `device_path`: Absolute path on the device, e.g. "/sdcard/Download/book.epub"
+  - `package_name`: Package to open the file with (optional; without it the device chooses)
+  - `activity_name`: Activity within that package, a leading dot resolved against it (optional)
+  - `mime_type`: MIME type to declare - some apps only match an intent that carries one (optional)
+- **Returns:** JSON string with operation result
+- **Location:** This function is found in the 'apps.py' module
+
+#### push_file / pull_file
+```python
+async def push_file(local_path: str, device_path: str) -> str:
+async def pull_file(device_path: str, local_path: str) -> str:
+```
+- **Parameters:** source and destination paths; either side may be a directory, in which case the file keeps its name
+- **Returns:** JSON string with the resolved path on the receiving side and the file's size
+- **Location:** These functions are found in the 'system.py' module
+
+#### get_screen_info
+```python
+async def get_screen_info() -> str:
+    """Get the device's display geometry and current rotation"""
+```
+- **Returns:** JSON string with `physical_size`, `current_size`, `density_dpi`, `rotation_degrees`, `orientation`, and `override_size` when one is set
+- **Note:** Tap coordinates are in `current_size` space, which follows rotation - not in `physical_size`
+- **Location:** This function is found in the 'system.py' module
 
 ## 📄 License
 

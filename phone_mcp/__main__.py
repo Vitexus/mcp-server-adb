@@ -10,9 +10,24 @@ from .core import check_device_connection
 from .tools.call import call_number, end_call, receive_incoming_call
 from .tools.messaging import send_text_message, receive_text_messages, get_sent_messages
 from .tools.media import take_screenshot, start_screen_recording, play_media
-from .tools.apps import set_alarm, list_installed_apps, terminate_app, launch_app_activity
+from .tools.apps import (
+    set_alarm,
+    list_installed_apps,
+    terminate_app,
+    launch_app_activity,
+    install_app,
+    uninstall_app,
+    grant_permission,
+    open_file,
+)
 from .tools.contacts import get_contacts, create_contact
-from .tools.system import get_current_window, get_app_shortcuts
+from .tools.system import (
+    get_current_window,
+    get_app_shortcuts,
+    push_file,
+    pull_file,
+    get_screen_info,
+)
 # Import screen interface for unified interaction and analysis
 from .tools.screen_interface import analyze_screen, interact_with_screen
 # Import UI monitoring - use MCP compatible version
@@ -44,6 +59,13 @@ mcp.tool()(get_app_shortcuts)
 mcp.tool()(launch_app_activity)
 mcp.tool()(list_installed_apps)
 mcp.tool()(terminate_app)
+mcp.tool()(install_app)
+mcp.tool()(uninstall_app)
+mcp.tool()(grant_permission)
+mcp.tool()(open_file)
+mcp.tool()(push_file)
+mcp.tool()(pull_file)
+mcp.tool()(get_screen_info)
 mcp.tool()(open_url)
 
 # Register unified screen interface tools
