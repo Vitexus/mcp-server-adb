@@ -1,3 +1,14 @@
+mcp-server-adb (0.3.8-1) unstable; urgency=medium
+
+  * Release 0.3.8.
+  * Auto-detect phone country calling code from system locales
+    (replaces hard-coded +86); override via PHONE_COUNTRY_CODE.
+  * Add PHONE_READONLY fail-closed guard for device-mutating tools.
+  * Add app install, file transfer, permissions and screen-info tools.
+  * Rename Debian package from phone-mcp-server to mcp-server-adb.
+
+ -- vitex <info@vitexsoftware.cz>  Sat, 19 Sep 2026 01:52:26 +0200
+
 mcp-server-adb (0.3.7-3) unstable; urgency=medium
 
   * Auto-detect default phone country calling code from system locales
