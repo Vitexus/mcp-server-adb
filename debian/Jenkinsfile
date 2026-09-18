@@ -114,7 +114,10 @@ distributions.each { distro ->
                         sh 'sudo apt-get update --allow-releaseinfo-change'
                         sh 'echo "INSTALATION"'
 
-                        def installOrder = []
+                        // Only install the main package in CI. The companion
+                        // mcprack-mcp-server-phone pulls in mcprack → bw-cli,
+                        // which is not always installable in the build image.
+                        def installOrder = ['phone-mcp-server']
 
                         def sorted_artifacts = artifacts.toList()
 
